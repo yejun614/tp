@@ -59,18 +59,17 @@ func (cmd *Cmd) RemoveSecret() error {
 }
 
 func FindCmds(query string) []Cmd {
-	check := []int{}
 	result := []Cmd{}
 
-	for index, cmd := range DB.Data.Cmds {
+	for _, cmd := range DB.Data.Cmds {
 		if cmd.Name == query {
 			result = append(result, cmd)
-			check = append(check, index)
+			return result
 		}
 	}
 
-	for index, cmd := range DB.Data.Cmds {
-		if !slices.Contains(check, index) && strings.Contains(cmd.Name, query) {
+	for _, cmd := range DB.Data.Cmds {
+		if strings.Contains(cmd.Name, query) {
 			result = append(result, cmd)
 		}
 	}
