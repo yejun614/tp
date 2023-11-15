@@ -147,22 +147,7 @@ func main() {
 		},
 	})
 
-	if DB.Data.SecretKey != "" {
-		cmds := FindCmds(DB.Data.SecretKey)
-		if len(cmds) != 0 {
-			secret, err := cmds[0].GetSecret()
-			if err != nil {
-				log.Fatal(err)
-			} else if secret != "" && secret != "<nil>" {
-				fmt.Println(secret)
-			}
-		}
-		DB.Data.SecretKey = ""
-		if err := DB.Save(); err != nil {
-			log.Fatal(err)
-		}
-
-	} else if *flagVer {
+	if *flagVer {
 		fmt.Println(ProgramVersion)
 
 	} else if *flagSettings {
@@ -193,7 +178,28 @@ func main() {
 			}
 		}
 
+		for _, cmd := range DB.Data.Cmds {
+			if !slices.Contains(names, cmd.Name) {
+				cmd.RemoveSecret()
+			}
+		}
+
 		DB.Data = programData
+		if err := DB.Save(); err != nil {
+			log.Fatal(err)
+		}
+
+	} else if DB.Data.SecretKey != "" {
+		cmds := FindCmds(DB.Data.SecretKey)
+		if len(cmds) != 0 {
+			secret, err := cmds[0].GetSecret()
+			if err != nil {
+				log.Fatal(err)
+			} else if secret != "" && secret != "<nil>" {
+				fmt.Println(secret)
+			}
+		}
+		DB.Data.SecretKey = ""
 		if err := DB.Save(); err != nil {
 			log.Fatal(err)
 		}
@@ -233,17 +239,21 @@ func main() {
 		if result.Args[0][:3] == "ssh" {
 			cmd.Stdin = os.Stdin
 
-			ex, err := os.Executable()
+			_, err := result.GetSecret()
 			if err == nil {
-				DB.Data.SecretKey = result.Name
-				if err := DB.Save(); err != nil {
-					log.Fatal(err)
-				}
+				ex, err := os.Executable()
+				if err == nil {
+					DB.Data.SecretKey = result.Name
+					if err := DB.Save(); err != nil {
+						log.Fatal(err)
+					}
 
-				cmd.Env = []string{}
-				cmd.Env = append(cmd.Env, fmt.Sprintf("SSH_ASKPASS=%s", ex))
-				cmd.Env = append(cmd.Env, "SSH_ASKPASS_REQUIRE=force")
+					cmd.Env = []string{}
+					cmd.Env = append(cmd.Env, fmt.Sprintf("SSH_ASKPASS=%s", ex))
+					cmd.Env = append(cmd.Env, "SSH_ASKPASS_REQUIRE=force")
+				}
 			}
+
 		} else {
 			secret, err := result.GetSecret()
 			if err != nil {
