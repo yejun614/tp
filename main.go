@@ -224,6 +224,11 @@ func main() {
 		}
 		result := results[0]
 
+		if len(result.Args) == 0 {
+			fmt.Println("No Commands")
+			return
+		}
+
 		if result.Args[0][:3] == "ssh" {
 			result.Args = append(result.Args, "-oStrictHostKeyChecking=accept-new")
 		}
