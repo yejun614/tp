@@ -225,6 +225,10 @@ func main() {
 		}
 		result := results[0]
 
+		if result.Args[0][:3] == "ssh" {
+			result.Args = append(result.Args, "-oStrictHostKeyChecking=accept-new")
+		}
+
 		if len(args) > 1 {
 			result.Args = append(result.Args, args[1:]...)
 		}
