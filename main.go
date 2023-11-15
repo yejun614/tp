@@ -231,6 +231,8 @@ func main() {
 		}
 
 		if result.Args[0][:3] == "ssh" {
+			cmd.Stdin = os.Stdin
+
 			ex, err := os.Executable()
 			if err == nil {
 				DB.Data.SecretKey = result.Name
