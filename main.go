@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"os/user"
@@ -19,7 +20,7 @@ import (
 )
 
 const (
-	ProgramVersion = "v0.1 beta"
+	ProgramVersion = "v0.2.0 beta"
 	ServiceName    = "tp-secret"
 )
 
@@ -28,16 +29,18 @@ var (
 )
 
 type Cmd struct {
-	Name        string
+	ID          string
+	Alias       string
 	Description string
-	Args        []string
+	Scripts     []string
 	Secret      string
 }
 
 type ProgramData struct {
-	SecretKey string
-	Editors   []string
-	Cmds      []Cmd
+	GetSecrets []string
+	Editors    []string
+	Shell      string
+	Cmds       []Cmd
 }
 
 func hash(input string) string {
@@ -47,29 +50,29 @@ func hash(input string) string {
 }
 
 func (cmd *Cmd) SetSecret(data string) error {
-	return keyring.Set(ServiceName, hash(cmd.Name), data)
+	return keyring.Set(ServiceName, hash(cmd.ID), data)
 }
 
 func (cmd *Cmd) GetSecret() (string, error) {
-	return keyring.Get(ServiceName, hash(cmd.Name))
+	return keyring.Get(ServiceName, hash(cmd.ID))
 }
 
 func (cmd *Cmd) RemoveSecret() error {
-	return keyring.Delete(ServiceName, hash(cmd.Name))
+	return keyring.Delete(ServiceName, hash(cmd.ID))
 }
 
 func FindCmds(query string) []Cmd {
 	result := []Cmd{}
 
 	for _, cmd := range DB.Data.Cmds {
-		if cmd.Name == query {
+		if cmd.Alias == query {
 			result = append(result, cmd)
 			return result
 		}
 	}
 
 	for _, cmd := range DB.Data.Cmds {
-		if strings.Contains(cmd.Name, query) {
+		if strings.Contains(cmd.Alias, query) {
 			result = append(result, cmd)
 		}
 	}
@@ -124,27 +127,29 @@ func ScanEditor(intro string) []byte {
 }
 
 func main() {
-	flagVer := flag.Bool("v", false, "Show program version")
-	flagSettings := flag.Bool("s", false, "Edit program settings")
-	flag.Parse()
-	args := flag.Args()
-
 	usr, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	DB = data.New(filepath.Join(usr.HomeDir, ".tp.conf"), ProgramData{
-		SecretKey: "",
-		Editors:   []string{"micro", "vim", "nano"},
+		GetSecrets: []string{},
+		Editors:    []string{"micro", "vim", "nano"},
+		Shell:      "bash -c",
 		Cmds: []Cmd{
 			{
-				Name:        "ping",
+				ID:          "ping-test",
+				Alias:       "ping",
 				Description: "Send ping localhost",
-				Args:        []string{"ping", "localhost"},
+				Scripts:     []string{"ping localhost"},
 			},
 		},
 	})
+
+	flagVer := flag.Bool("v", false, "Show program version")
+	flagSettings := flag.Bool("s", false, "Edit program settings")
+	flag.Parse()
+	args := flag.Args()
 
 	if *flagVer {
 		fmt.Println(ProgramVersion)
@@ -161,14 +166,19 @@ func main() {
 			log.Fatal(err)
 		}
 
-		names := []string{}
+		ids := []string{}
 		for index, cmd := range programData.Cmds {
-			if slices.Contains(names, cmd.Name) {
-				fmt.Println("Duplicated Names (Settings Ignored)")
-				fmt.Printf("- %s\n", cmd.Name)
+			if cmd.ID == "" {
+				cmd.ID = hash(fmt.Sprintf("%v", rand.Float64()))
+				programData.Cmds[index].ID = cmd.ID
+			}
+
+			if slices.Contains(ids, cmd.ID) {
+				fmt.Println("Duplicated ID (Settings Ignored)")
+				fmt.Printf("- %s\n", cmd.ID)
 				return
 			} else {
-				names = append(names, cmd.Name)
+				ids = append(ids, cmd.ID)
 			}
 
 			if cmd.Secret != "" {
@@ -178,7 +188,13 @@ func main() {
 		}
 
 		for _, cmd := range DB.Data.Cmds {
-			if !slices.Contains(names, cmd.Name) {
+			if !slices.Contains(ids, cmd.ID) {
+				fmt.Printf("Remove %s", cmd.Alias)
+				if cmd.Description != "" {
+					fmt.Printf(" - %s", cmd.Description)
+				}
+				fmt.Println()
+
 				cmd.RemoveSecret()
 			}
 		}
@@ -188,17 +204,21 @@ func main() {
 			log.Fatal(err)
 		}
 
-	} else if DB.Data.SecretKey != "" {
-		cmds := FindCmds(DB.Data.SecretKey)
-		if len(cmds) != 0 {
-			secret, err := cmds[0].GetSecret()
-			if err != nil {
-				log.Fatal(err)
-			} else if secret != "" && secret != "<nil>" {
-				fmt.Println(secret)
+	} else if len(DB.Data.GetSecrets) > 0 {
+		target := DB.Data.GetSecrets[0]
+		DB.Data.GetSecrets = DB.Data.GetSecrets[1:]
+
+		for _, cmd := range DB.Data.Cmds {
+			if cmd.ID == target {
+				secret, err := cmd.GetSecret()
+				if err != nil {
+					log.Fatal(err)
+				} else if secret != "" && secret != "<nil>" {
+					fmt.Println(secret)
+				}
 			}
 		}
-		DB.Data.SecretKey = ""
+
 		if err := DB.Save(); err != nil {
 			log.Fatal(err)
 		}
@@ -211,8 +231,11 @@ func main() {
 
 		results := FindCmds(args[0])
 		for _, result := range results {
-			fmt.Printf("[%s] %s\n", result.Name, result.Description)
-			fmt.Printf("$ %s\n\n", strings.Join(result.Args, " "))
+			fmt.Printf("[%s] %s\n", result.Alias, result.Description)
+			for _, script := range result.Scripts {
+				fmt.Printf("$ %s\n", script)
+			}
+			fmt.Println()
 		}
 
 		if len(results) == 0 {
@@ -224,71 +247,44 @@ func main() {
 		}
 		result := results[0]
 
-		if len(result.Args) == 0 {
-			fmt.Println("No Commands")
+		if len(result.Scripts) == 0 {
+			fmt.Println("No Scripts")
 			return
 		}
 
-		if result.Args[0][:3] == "ssh" {
-			result.Args = append(result.Args, "-oStrictHostKeyChecking=accept-new")
-		}
-
-		if len(args) > 1 {
-			result.Args = append(result.Args, args[1:]...)
-		}
-
-		var cmd *exec.Cmd
-		if len(result.Args) == 1 {
-			cmd = exec.Command(result.Args[0])
-		} else {
-			cmd = exec.Command(result.Args[0], result.Args[1:]...)
-		}
-
-		if result.Args[0][:3] == "ssh" {
-			cmd.Stdin = os.Stdin
-
-			_, err := result.GetSecret()
-			if err == nil {
+		cmdArgs := result.Scripts
+		cmdArgs = append(cmdArgs, args[1:]...)
+		cmdStr := ""
+		for index, script := range cmdArgs {
+			if script[:3] == "ssh" {
+				DB.Data.GetSecrets = append(DB.Data.GetSecrets, result.ID)
 				ex, err := os.Executable()
 				if err == nil {
-					DB.Data.SecretKey = result.Name
-					if err := DB.Save(); err != nil {
-						log.Fatal(err)
-					}
-
-					cmd.Env = []string{}
-					cmd.Env = append(cmd.Env, fmt.Sprintf("SSH_ASKPASS=%s", ex))
-					cmd.Env = append(cmd.Env, "SSH_ASKPASS_REQUIRE=force")
+					script = fmt.Sprintf("SSH_ASKPASS=%s SSH_ASKPASS_REQUIRE=force %s", ex, script)
 				}
+				script += " -oStrictHostKeyChecking=accept-new"
 			}
-
-		} else {
-			secret, err := result.GetSecret()
-			if err != nil {
-				log.Fatal(err)
+			if index != 0 {
+				cmdStr += "&&"
 			}
-
-			if secret != "" && secret != "<nil>" {
-				w, err := cmd.StdinPipe()
-				if err != nil {
-					log.Fatal(err)
-				}
-				w.Write([]byte("print('hello')\n"))
-				w.Close()
-
-			} else {
-				cmd.Stdin = os.Stdin
-			}
+			cmdStr += script
 		}
 
+		if err := DB.Save(); err != nil {
+			log.Fatal(err)
+		}
+
+		sh := strings.Split(DB.Data.Shell, " ")
+		sh = append(sh, cmdStr)
+		cmd := exec.Command(sh[0], sh[1:]...)
+
+		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
-		if err := cmd.Start(); err != nil {
+		if err := cmd.Run(); err != nil {
 			log.Println(err)
 			os.Exit(1)
 		}
-
-		cmd.Wait()
 	}
 }
