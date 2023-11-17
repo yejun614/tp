@@ -271,13 +271,13 @@ func main() {
 		cmdArgs = append(cmdArgs, args[1:]...)
 		cmdStr := ""
 		for index, script := range cmdArgs {
-			if script[:3] == "ssh" {
+			if script[:3] == "ssh" || script[:3] == "scp" {
 				DB.Data.GetSecrets = append(DB.Data.GetSecrets, result.ID)
+				script = fmt.Sprintf("%s -oStrictHostKeyChecking=accept-new %s", script[:3], script[4:])
 				ex, err := os.Executable()
 				if err == nil {
 					script = fmt.Sprintf("SSH_ASKPASS=%s SSH_ASKPASS_REQUIRE=force %s", ex, script)
 				}
-				script += " -oStrictHostKeyChecking=accept-new"
 			}
 			if index != 0 {
 				cmdStr += "&&"
