@@ -148,6 +148,7 @@ func main() {
 
 	flagVer := flag.Bool("v", false, "Show program version")
 	flagSettings := flag.Bool("s", false, "Edit program settings")
+	flagSecret := flag.Bool("p", false, "Get secret string")
 	flag.Parse()
 	args := flag.Args()
 
@@ -203,6 +204,20 @@ func main() {
 		if err := DB.Save(); err != nil {
 			log.Fatal(err)
 		}
+
+	} else if *flagSecret {
+		id := args[0]
+		for _, cmd := range DB.Data.Cmds {
+			if cmd.ID[:len(id)] == id {
+				secret, err := cmd.GetSecret()
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Println(secret)
+				return
+			}
+		}
+		panic("Cannot found the secret")
 
 	} else if len(DB.Data.GetSecrets) > 0 {
 		target := DB.Data.GetSecrets[0]
